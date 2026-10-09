@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Focus Timer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --background: #f8f4ef;
+      --text: #2e2925;
+      --track: #e8e0d8;
+      --accent: #9d826d;
+      --button: #eee8e1;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--background);
+    }
+
+    body {
+      display: grid;
+      place-items: center;
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .timer-widget {
+      width: min(92vw, 520px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: clamp(18px, 4vh, 28px);
+    }
+
+    .timer-face {
+      position: relative;
+      width: min(72vw, 340px);
+      aspect-ratio: 1;
+      display: grid;
+      place-items: center;
+    }
+
+    .progress-ring {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      transform: rotate(-90deg);
+      overflow: visible;
+    }
+
+    .progress-ring circle {
+      fill: none;
+      stroke-width: 5;
+    }
+
+    .progress-track { stroke: var(--track); }
+
+    .progress-value {
+      stroke: var(--accent);
+      stroke-linecap: round;
+      transition: stroke-dashoffset 0.35s linear;
+    }
+
+    .time {
+      position: relative;
+      z-index: 1;
+      margin-top: -2px;
+      font-family: "Cormorant Garamond", Georgia, serif;
+      font-size: clamp(66px, 18vw, 106px);
+      font-weight: 500;
+      line-height: 1;
+      letter-spacing: -0.045em;
+      font-variant-numeric: tabular-nums;
+      user-select: none;
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 34px;
+    }
+
+    button {
+      width: 48px;
+      height: 48px;
+      padding: 0;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 13px;
+      background: var(--button);
+      color: var(--text);
+      cursor: pointer;
+      transition: transform 0.16s ease, background 0.16s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    button:hover { transform: translateY(-2px); }
+    button:active { transform: translateY(0) scale(0.96); }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+
+    .adjust {
+      font: 300 29px/1 Arial, sans-serif;
+    }
+
+    .play-pause {
+      width: 54px;
+      height: 54px;
+      border-radius: 15px;
+      background: var(--accent);
+      color: #fffaf5;
+    }
+
+    .play-icon {
+      width: 0;
+      height: 0;
+      margin-left: 4px;
+      border-top: 9px solid transparent;
+      border-bottom: 9px solid transparent;
+      border-left: 14px solid currentColor;
+    }
+
+    .pause-icon {
+      width: 14px;
+      height: 18px;
+      display: none;
+      border-left: 4px solid currentColor;
+      border-right: 4px solid currentColor;
+    }
+
+    .is-running .play-icon { display: none; }
+    .is-running .pause-icon { display: block; }
+
+    @media (max-height: 430px) {
+      .timer-widget { flex-direction: row; justify-content: center; gap: 24px; }
+      .timer-face { width: min(58vh, 300px); }
+      .controls { gap: 18px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition: none !important; }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="timer-widget" aria-label="Focus timer">
+    <section class="timer-face">
+      <svg class="progress-ring" viewBox="0 0 340 340" aria-hidden="true">
+        <circle class="progress-track" cx="170" cy="170" r="155"></circle>
+        <circle class="progress-value" cx="170" cy="170" r="155"></circle>
+      </svg>
+      <div class="time" id="time" role="timer" aria-live="polite">25:00</div>
+    </section>
+
+    <div class="controls">
+      <button class="adjust" id="decrease" type="button" aria-label="Decrease timer by 5 minutes">−</button>
+      <button class="play-pause" id="playPause" type="button" aria-label="Start timer">
+        <span class="play-icon" aria-hidden="true"></span>
+        <span class="pause-icon" aria-hidden="true"></span>
+      </button>
+      <button class="adjust" id="increase" type="button" aria-label="Increase timer by 5 minutes">+</button>
+    </div>
+  </main>
+
+  <script>
+    const timeDisplay = document.getElementById("time");
+    const playPauseButton = document.getElementById("playPause");
+    const decreaseButton = document.getElementById("decrease");
+    const increaseButton = document.getElementById("increase");
+    const progressCircle = document.querySelector(".progress-value");
+
+    const radius = Number(progressCircle.getAttribute("r"));
+    const circumference = 2 * Math.PI * radius;
+    progressCircle.style.strokeDasharray = circumference;
+
+    let selectedMinutes = 25;
+    let totalSeconds = selectedMinutes * 60;
+    let remainingSeconds = totalSeconds;
+    let timerId = null;
+    let endTime = null;
+
+    function formatTime(seconds) {
+      const minutes = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      return `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+    }
+
+    function render() {
+      timeDisplay.textContent = formatTime(remainingSeconds);
+      document.title = `${formatTime(remainingSeconds)} · Focus Timer`;
+
+      const progress = totalSeconds ? remainingSeconds / totalSeconds : 0;
+      progressCircle.style.strokeDashoffset = circumference * (1 - progress);
+    }
+
+    function setRunning(running) {
+      playPauseButton.classList.toggle("is-running", running);
+      playPauseButton.setAttribute("aria-label", running ? "Pause timer" : "Start timer");
+    }
+
+    function pauseTimer() {
+      window.clearInterval(timerId);
+      timerId = null;
+      endTime = null;
+      setRunning(false);
+    }
+
+    function finishTimer() {
+      pauseTimer();
+      remainingSeconds = 0;
+      render();
+
+      try {
+        const audio = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audio.createOscillator();
+        const gain = audio.createGain();
+        oscillator.frequency.value = 520;
+        gain.gain.setValueAtTime(0.08, audio.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + 0.8);
+        oscillator.connect(gain).connect(audio.destination);
+        oscillator.start();
+        oscillator.stop(audio.currentTime + 0.8);
+      } catch (_) {}
+    }
+
+    function tick() {
+      remainingSeconds = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
+      render();
+      if (remainingSeconds === 0) finishTimer();
+    }
+
+    function startTimer() {
+      if (remainingSeconds === 0) remainingSeconds = totalSeconds;
+      endTime = Date.now() + remainingSeconds * 1000;
+      timerId = window.setInterval(tick, 250);
+      setRunning(true);
+      tick();
+    }
+
+    function changeMinutes(amount) {
+      pauseTimer();
+      selectedMinutes = Math.min(120, Math.max(5, selectedMinutes + amount));
+      totalSeconds = selectedMinutes * 60;
+      remainingSeconds = totalSeconds;
+      render();
+    }
+
+    playPauseButton.addEventListener("click", () => timerId ? pauseTimer() : startTimer());
+    decreaseButton.addEventListener("click", () => changeMinutes(-5));
+    increaseButton.addEventListener("click", () => changeMinutes(5));
+
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden && timerId) tick();
+    });
+
+    render();
+  </script>
+</body>
+</html>
